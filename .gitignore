@@ -87,3 +87,13 @@ target/
 
 # Mypy cache
 .mypy_cache/
+
+# Virtual Environment
+.venv/
+venv/
+
+.env
+
+# Others
+PROJECT_CONTEXT.md
+cryptobot_timeline.html
