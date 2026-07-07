@@ -38,6 +38,7 @@ HISTORICAL_START_DATE = "01.01.2026T00:00"
 # Storage names — single source of truth, shared by writers, init, and ML
 POSTGRES_TABLE = "ohlcv_data"        # historical candles (batch pipeline)
 MONGO_COLLECTION = "closed_candles"  # completed live candles (stream pipeline)
+PREDICTIONS_COLLECTION = "predictions"  # model forecasts (for predicted-vs-actual tracking)
 
 # Trained ML model artifact (saved under the repo's models/ directory)
 MODEL_FILENAME = "model.pkl"

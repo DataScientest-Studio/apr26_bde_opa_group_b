@@ -60,7 +60,10 @@ def main():
         on_error=on_error,
         on_close=on_close,
     )
-    ws.run_forever()  # blocks; reconnect on drop is a later enhancement
+    # Auto-reconnect 5s after any drop, with keepalive pings (every 20s, 10s
+    # timeout) so a dead connection is detected and re-established instead of
+    # silently leaving a gap in closed_candles.
+    ws.run_forever(reconnect=5, ping_interval=20, ping_timeout=10)
 
 
 if __name__ == "__main__":

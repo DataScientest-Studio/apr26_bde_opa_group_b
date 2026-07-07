@@ -1,7 +1,7 @@
 from pathlib import Path
 from src.storage.postgres import engine
 from src.storage.mongo import get_collection
-from src.params.constants import MONGO_COLLECTION
+from src.params.constants import MONGO_COLLECTION, PREDICTIONS_COLLECTION
 
 SCHEMA_FILE = Path(__file__).parent / "schema.sql"
 
@@ -22,6 +22,14 @@ def init_mongo():
         unique=True,
     )
     print(f"✓ Mongo index ready on '{MONGO_COLLECTION}'")
+
+    # One stored forecast per predicted candle: unique on (symbol, target time).
+    predictions = get_collection(PREDICTIONS_COLLECTION)
+    predictions.create_index(
+        [("symbol", 1), ("target_kline_start_time", -1)],
+        unique=True,
+    )
+    print(f"✓ Mongo index ready on '{PREDICTIONS_COLLECTION}'")
 
 
 def init_db():

@@ -1,0 +1,21 @@
+# Keep the build context (and image) small and free of secrets.
+.git
+.gitignore
+.github
+
+# Secrets — passed in at runtime via docker-compose env_file, never baked in.
+.env
+
+# Local Python environments / caches
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+
+# Not needed inside the runtime image
+notebooks
+references
+reports
+*.md

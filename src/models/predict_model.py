@@ -1,3 +1,4 @@
+from datetime import timedelta
 from pathlib import Path
 
 import joblib
@@ -14,8 +15,18 @@ from src.params.constants import (
 MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / MODEL_FILENAME
 SYMBOL = SUPPORTED_SYMBOLS[0].value
 
+# How far ahead the "next" candle is, per Binance interval string.
+INTERVAL_MINUTES = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "1d": 1440}
 
-def predict_next_close(symbol=SYMBOL, n=1):
+
+def predict_next_close_detailed(symbol=SYMBOL, n=1):
+    """Predict the next candle's close from the latest candle in Mongo.
+
+    Returns a dict with the prediction AND the timing info needed to store it:
+      - source_kline_start_time : the candle fed to the model (the input)
+      - target_kline_start_time : the candle being predicted (input + 1 interval)
+      - predicted_close         : the model's forecast
+    """
     # 1. Load the trained model
     model = joblib.load(MODEL_PATH)
 
@@ -28,10 +39,25 @@ def predict_next_close(symbol=SYMBOL, n=1):
     # 3. Build the SAME features used in training, then predict
     df = pd.DataFrame(docs)
     X = make_features(df)
-    prediction = model.predict(X)
+    predicted_close = float(model.predict(X)[0])   # row 0 = newest candle
 
-    # Prediction for the most recent candle
-    return float(prediction[0])
+    # 4. Work out which candle this prediction is FOR (the next one)
+    source = docs[0]
+    source_start = source["kline_start_time"]
+    minutes = INTERVAL_MINUTES.get(source.get("interval", "1m"), 1)
+    target_start = source_start + timedelta(minutes=minutes)
+
+    return {
+        "symbol": symbol,
+        "source_kline_start_time": source_start,
+        "target_kline_start_time": target_start,
+        "predicted_close": predicted_close,
+    }
+
+
+def predict_next_close(symbol=SYMBOL, n=1):
+    """Backwards-compatible helper: return just the predicted close value."""
+    return predict_next_close_detailed(symbol=symbol, n=n)["predicted_close"]
 
 
 if __name__ == "__main__":

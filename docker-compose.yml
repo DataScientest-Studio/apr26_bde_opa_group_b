@@ -1,4 +1,32 @@
+# ===========================================================================
+# CryptoBot — full stack in one command:   docker compose up --build
+#
+#   postgres   : historical candle store
+#   mongodb    : live closed-candle store
+#   init       : (one-shot) create the Postgres table + Mongo index, then exit
+#   historical : (one-shot) backfill / catch up historical candles, then exit
+#   streamer   : (always-on) live Binance WebSocket -> MongoDB
+#   api        : (always-on) FastAPI  -> http://localhost:8000/docs
+#   dashboard  : (always-on) Streamlit -> http://localhost:8501
+# ===========================================================================
+
+# Shared config for every Python app container (merged in below with "<<: *app").
+x-app: &app
+  build: .
+  image: cryptobot-app          # built once, reused by all app services
+  env_file: .env                # POSTGRES_USER/PASSWORD/DB, MONGO_USER/PASSWORD/DB
+  environment:
+    # Inside the Docker network, services reach the databases by SERVICE NAME
+    # (not localhost) on their INTERNAL ports. These override the .env values.
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: 5432
+    MONGO_HOST: mongodb
+    MONGO_PORT: 27017
+  networks:
+    - pipeline_network
+
 services:
+  # ----------------------------- Databases -----------------------------
   postgres:
     image: postgres:15
     container_name: cryptobot-postgres
@@ -36,10 +64,106 @@ services:
       interval: 5s
       retries: 5
 
+  # ------------------- One-shot: create schema + indexes -------------------
+  init:
+    <<: *app
+    container_name: cryptobot-init
+    command: python -m src.storage.init_db
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+
+  # ------------------- One-shot: backfill historical data -------------------
+  # Idempotent (resumes from the last stored candle), so it's safe to run on
+  # every `up`. Other services don't wait for it — the dashboard is usable
+  # while this catches the database up in the background.
+  historical:
+    <<: *app
+    container_name: cryptobot-historical
+    command: python -m src.collection.fetch_historical
+    restart: "no"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  # ------------------- Always-on: live stream -> MongoDB -------------------
+  streamer:
+    <<: *app
+    container_name: cryptobot-streamer
+    command: python -m src.collection.stream_live
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  # ------------------- Always-on: FastAPI -------------------
+  api:
+    <<: *app
+    container_name: cryptobot-api
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    ports:
+      - "8000:8000"      # http://localhost:8000/docs  (change the LEFT port if 8000 is busy)
+    volumes:
+      - models_data:/app/models     # read the model Airflow retrains (shared volume)
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  # ------------------- Always-on: Streamlit dashboard -------------------
+  dashboard:
+    <<: *app
+    container_name: cryptobot-dashboard
+    command: streamlit run src/visualization/app.py --server.port=8501 --server.address=0.0.0.0 --server.headless=true
+    restart: unless-stopped
+    environment:
+      API_BASE: http://api:8000     # reach the API container by its service name
+    ports:
+      - "8501:8501"      # http://localhost:8501
+    depends_on:
+      - api
+
+  # ------------------- Orchestration: Apache Airflow -------------------
+  # Airflow only ORCHESTRATES. Each task launches a container from the
+  # cryptobot-app image (via DockerOperator), so Airflow needs none of the
+  # project's data dependencies. DAGs live in airflow/dags/:
+  #   cryptobot_ingest — fetch_historical every 15 min
+  #   cryptobot_train  — fetch + retrain the model daily
+  airflow:
+    build:
+      context: .
+      dockerfile: airflow/Dockerfile
+    image: cryptobot-airflow
+    container_name: cryptobot-airflow
+    restart: unless-stopped
+    command: standalone
+    env_file: .env                  # gives the DAGs the DB user/password/name
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    ports:
+      - "8080:8080"                 # Airflow UI -> http://localhost:8080
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags           # edit DAGs without rebuilding
+      - airflow_data:/opt/airflow                   # persist Airflow's metadata DB
+      - /var/run/docker.sock:/var/run/docker.sock   # lets DockerOperator launch task containers
+    networks:
+      - pipeline_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
 
 networks:
   pipeline_network:
+    name: cryptobot_network         # stable name so DockerOperator can attach tasks
 
 volumes:
   postgres_data:
   mongo_data:
+  models_data:
+    name: cryptobot_models          # stable name for the shared model volume
+  airflow_data:

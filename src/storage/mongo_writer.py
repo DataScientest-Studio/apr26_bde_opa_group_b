@@ -1,5 +1,5 @@
 from src.storage.mongo import get_collection
-from src.params.constants import MONGO_COLLECTION
+from src.params.constants import MONGO_COLLECTION, PREDICTIONS_COLLECTION
 
 
 def save_closed_candle(doc, collection_name=MONGO_COLLECTION):
@@ -12,6 +12,21 @@ def save_closed_candle(doc, collection_name=MONGO_COLLECTION):
     collection = get_collection(collection_name)
     collection.update_one(
         {"symbol": doc["symbol"], "kline_start_time": doc["kline_start_time"]},
+        {"$set": doc},
+        upsert=True,
+    )
+
+
+def save_prediction(doc, collection_name=PREDICTIONS_COLLECTION):
+    """Idempotently store one forecast.
+
+    Upsert keyed on (symbol, target_kline_start_time) so repeated predictions
+    for the SAME target candle update in place instead of piling up duplicates.
+    """
+    collection = get_collection(collection_name)
+    collection.update_one(
+        {"symbol": doc["symbol"],
+         "target_kline_start_time": doc["target_kline_start_time"]},
         {"$set": doc},
         upsert=True,
     )
