@@ -136,10 +136,10 @@ def read_latest_tick():
 # ---------------------------------------------------------------------------
 # 2. SIDEBAR — the controls on the left
 # ---------------------------------------------------------------------------
-st.sidebar.header("⚙️ Controls")
+st.sidebar.header("Controls")
 symbol = st.sidebar.selectbox("Symbol", ["BTCUSDT"])
 limit = st.sidebar.slider("Historical candles to show", 20, 500, 100, step=10)
-if st.sidebar.button("🔄 Refresh historical"):
+if st.sidebar.button("Refresh historical"):
     st.cache_data.clear()
     st.rerun()
 
@@ -147,7 +147,7 @@ if st.sidebar.button("🔄 Refresh historical"):
 # ---------------------------------------------------------------------------
 # 3. HEADER + HEALTH GATE
 # ---------------------------------------------------------------------------
-st.title("📈 CryptoBot — Live + Historical Price Chart")
+st.title("CryptoBot — Live + Historical Price Chart")
 st.caption("One candlestick view: historical candles, live forming candles, and the next-candle forecast.")
 
 if not api_is_up():
@@ -269,7 +269,7 @@ def merged_chart():
     # Forecasts are stored in MongoDB by the API and joined with each candle's
     # real close once it lands. So this is TRUE history that survives page
     # reloads and restarts — not just this browser session.
-    st.subheader("🎯 Predicted vs actual close (stored history)")
+    st.subheader("Predicted vs actual close (stored history)")
     try:
         preds = fetch_predictions(symbol)
     except requests.RequestException:
@@ -280,16 +280,26 @@ def merged_chart():
     else:
         pdf = pd.DataFrame(preds)
         pdf["target_time"] = pd.to_datetime(pdf["target_time"])
-        pdf = pdf.set_index("target_time")
+        pdf = pdf.set_index("target_time").sort_index()
+
+        # Use a CATEGORY x-axis (same as the candlestick chart above): each
+        # timestamp becomes an evenly-spaced slot instead of a real point in
+        # time. Idle periods (e.g. days with no data) collapse away, so the
+        # points pack side-by-side with no huge empty stretch — and no
+        # misleading straight line bridging the gap.
+        labels = pdf.index.strftime("%m-%d %H:%M")
+
         # Plotly (not st.line_chart) so the y-axis auto-zooms to the price range
         # instead of forcing 0 — otherwise the lines look flat near the top.
+        # connectgaps=False keeps the green line broken where actual_close is
+        # still missing (recent candles that haven't closed yet).
         fig2 = go.Figure()
         fig2.add_trace(go.Scatter(
-            x=pdf.index, y=pdf["actual_close"], mode="lines",
+            x=labels, y=pdf["actual_close"], mode="lines", connectgaps=False,
             name="actual", line=dict(color="#0ecb81"),
         ))
         fig2.add_trace(go.Scatter(
-            x=pdf.index, y=pdf["predicted_close"], mode="lines",
+            x=labels, y=pdf["predicted_close"], mode="lines", connectgaps=False,
             name="predicted", line=dict(color="#f5b041", dash="dot"),
         ))
         fig2.update_layout(
@@ -298,7 +308,8 @@ def merged_chart():
             font=dict(color="#d1d4dc"),
             height=320,
             margin=dict(l=10, r=10, t=10, b=10),
-            xaxis=dict(showgrid=True, gridcolor="#1c2127"),
+            xaxis_type="category",             # gapless, evenly-spaced slots
+            xaxis=dict(nticks=12, showgrid=True, gridcolor="#1c2127"),
             yaxis=dict(showgrid=True, gridcolor="#1c2127", side="right"),
             legend=dict(orientation="h", y=1.12, x=0),
         )
@@ -319,5 +330,5 @@ merged_chart()   # call once; the fragment keeps itself refreshing every 2s
 # ---------------------------------------------------------------------------
 # 6. RAW DATA (collapsible) — the historical candles behind the chart
 # ---------------------------------------------------------------------------
-with st.expander("🔎 Show raw historical candle data"):
+with st.expander("Show raw historical candle data"):
     st.dataframe(hist_df[::-1], use_container_width=True)
